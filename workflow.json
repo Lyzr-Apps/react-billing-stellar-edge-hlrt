@@ -1,0 +1,32 @@
+{
+  "nodes": [
+    {
+      "id": "input_node",
+      "type": "Input",
+      "label": "User Query",
+      "nodeCategory": "input"
+    },
+    {
+      "id": "billing_assistant_agent",
+      "type": "Agent",
+      "label": "Billing Assistant Agent",
+      "nodeCategory": "agent"
+    },
+    {
+      "id": "sales_analytics_agent",
+      "type": "Agent",
+      "label": "Sales Analytics Agent",
+      "nodeCategory": "agent"
+    }
+  ],
+  "edges": [
+    {
+      "source": "input_node",
+      "target": "billing_assistant_agent"
+    },
+    {
+      "source": "billing_assistant_agent",
+      "target": "sales_analytics_agent"
+    }
+  ]
+}

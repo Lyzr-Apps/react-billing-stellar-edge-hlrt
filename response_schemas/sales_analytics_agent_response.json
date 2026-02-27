@@ -1,0 +1,80 @@
+{
+  "agent_name": "Sales Analytics Agent",
+  "agent_id": "69a1871fdb8e0879c3c8f354",
+  "description": "Helps store managers query and interpret sales trends, top-selling items, revenue summaries, and performance insights conversationally",
+  "agent_type": "json",
+  "accessor": "result",
+  "auto_generated": true,
+  "response_schema": {
+    "result": {
+      "response_type": "string",
+      "message": "string",
+      "data": {
+        "metrics": [
+          {
+            "metric_name": "string",
+            "value": "string",
+            "change_percentage": "string",
+            "period": "string"
+          }
+        ],
+        "top_items": [
+          {
+            "rank": "string",
+            "item_name": "string",
+            "category": "string",
+            "units_sold": "string",
+            "revenue": "string"
+          }
+        ],
+        "trends": [
+          {
+            "period": "string",
+            "description": "string",
+            "direction": "string"
+          }
+        ]
+      },
+      "recommendations": [
+        "string"
+      ],
+      "summary": "string"
+    }
+  },
+  "example_response": {
+    "result": {
+      "response_type": "Type of analysis: trend_analysis, top_sellers, revenue_summary, customer_insights, inventory_analysis, or general",
+      "message": "Main analytical insight for the store manager",
+      "data": {
+        "metrics": [
+          {
+            "metric_name": "sample string",
+            "value": "sample string",
+            "change_percentage": "sample string",
+            "period": "sample string"
+          }
+        ],
+        "top_items": [
+          {
+            "rank": "sample string",
+            "item_name": "sample string",
+            "category": "sample string",
+            "units_sold": "sample string",
+            "revenue": "sample string"
+          }
+        ],
+        "trends": [
+          {
+            "period": "sample string",
+            "description": "sample string",
+            "direction": "sample string"
+          }
+        ]
+      },
+      "recommendations": [
+        "sample string"
+      ],
+      "summary": "sample string"
+    }
+  }
+}

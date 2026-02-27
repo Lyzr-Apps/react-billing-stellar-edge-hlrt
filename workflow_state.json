@@ -1,0 +1,36 @@
+{
+  "agents": [
+    {
+      "agent_id": "69a1871e538debb70c587988",
+      "name": "Billing Assistant Agent",
+      "description": "Assists cashiers with product queries, discount recommendations, offer lookups, and transaction support during checkout",
+      "agent_role": "Supermarket Billing Assistant",
+      "provider_id": "OpenAI",
+      "model": "gpt-4.1",
+      "temperature": 0.3,
+      "top_p": 1,
+      "agent_type": "json",
+      "accessor": "result",
+      "trigger": "Ask Assistant on POS Checkout Screen",
+      "image_output_config": null,
+      "voice_config": null,
+      "file_output": false
+    },
+    {
+      "agent_id": "69a1871fdb8e0879c3c8f354",
+      "name": "Sales Analytics Agent",
+      "description": "Helps store managers query and interpret sales trends, top-selling items, revenue summaries, and performance insights conversationally",
+      "agent_role": "Sales Analytics Assistant",
+      "provider_id": "Perplexity",
+      "model": "sonar-pro",
+      "temperature": 0.3,
+      "top_p": 1,
+      "agent_type": "json",
+      "accessor": "result",
+      "trigger": "Ask Analytics on Analytics Dashboard",
+      "image_output_config": null,
+      "voice_config": null,
+      "file_output": false
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "agent_name": "Billing Assistant Agent",
+  "agent_id": "69a1871e538debb70c587988",
+  "description": "Assists cashiers with product queries, discount recommendations, offer lookups, and transaction support during checkout",
+  "agent_type": "json",
+  "accessor": "result",
+  "auto_generated": true,
+  "response_schema": {
+    "result": {
+      "response_type": "string",
+      "message": "string",
+      "details": {
+        "products": [
+          {
+            "name": "string",
+            "price": "string",
+            "category": "string",
+            "availability": "string"
+          }
+        ],
+        "discounts": [
+          {
+            "offer_name": "string",
+            "discount_percentage": "string",
+            "applicable_products": "string",
+            "conditions": "string"
+          }
+        ],
+        "billing_summary": {
+          "subtotal": "string",
+          "discount_applied": "string",
+          "total": "string",
+          "notes": "string"
+        }
+      },
+      "suggestions": [
+        "string"
+      ]
+    }
+  },
+  "example_response": {
+    "result": {
+      "response_type": "Type of response: product_info, discount, transaction, promotion, or general",
+      "message": "Main response text for the cashier",
+      "details": {
+        "products": [
+          {
+            "name": "sample string",
+            "price": "sample string",
+            "category": "sample string",
+            "availability": "sample string"
+          }
+        ],
+        "discounts": [
+          {
+            "offer_name": "sample string",
+            "discount_percentage": "sample string",
+            "applicable_products": "sample string",
+            "conditions": "sample string"
+          }
+        ],
+        "billing_summary": {
+          "subtotal": "sample string",
+          "discount_applied": "sample string",
+          "total": "sample string",
+          "notes": "sample string"
+        }
+      },
+      "suggestions": [
+        "sample string"
+      ]
+    }
+  }
+}
