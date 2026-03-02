@@ -17,7 +17,7 @@ import {
   FiTag, FiBarChart2, FiClock, FiEdit2, FiPrinter,
   FiCheckCircle, FiAlertTriangle, FiPercent, FiHash,
   FiUser, FiPhone, FiCalendar, FiActivity,
-  FiChevronDown, FiChevronUp, FiRefreshCw, FiMenu
+  FiChevronDown, FiChevronUp, FiRefreshCw, FiMenu, FiSmartphone
 } from 'react-icons/fi'
 
 // ─── AGENT IDS ────────────────────────────────────────────────
@@ -80,6 +80,10 @@ interface Bill {
   paymentMethod: string
   status: string
   customerName?: string
+  discountCode?: string
+  discountName?: string
+  discountPercentage?: number
+  customerPhone?: string
 }
 
 interface Customer {
@@ -101,6 +105,7 @@ interface Offer {
   validTo: string
   categories: string[]
   active: boolean
+  code: string
 }
 
 interface ChatMessage {
@@ -138,10 +143,13 @@ const INITIAL_CUSTOMERS: Customer[] = [
 ]
 
 const INITIAL_OFFERS: Offer[] = [
-  { id: 'O001', name: 'Weekend Dairy Delight', type: 'percentage', value: 15, validFrom: '2025-02-01', validTo: '2025-03-31', categories: ['Dairy'], active: true },
-  { id: 'O002', name: 'Grain Saver Pack', type: 'flat', value: 50, validFrom: '2025-02-15', validTo: '2025-03-15', categories: ['Grains'], active: true },
-  { id: 'O003', name: 'Buy 2 Get 1 Beverages', type: 'bogo', value: 0, validFrom: '2025-02-01', validTo: '2025-02-28', categories: ['Beverages'], active: false },
-  { id: 'O004', name: 'Essentials Discount', type: 'percentage', value: 10, validFrom: '2025-01-01', validTo: '2025-12-31', categories: ['Essentials', 'Condiments'], active: true },
+  { id: 'O001', name: 'Weekend Dairy Delight', type: 'percentage', value: 15, validFrom: '2025-02-01', validTo: '2025-12-31', categories: ['Dairy'], active: true, code: 'DAIRY15' },
+  { id: 'O002', name: 'Grain Saver Pack', type: 'flat', value: 50, validFrom: '2025-02-15', validTo: '2025-12-31', categories: ['Grains'], active: true, code: 'GRAIN50' },
+  { id: 'O003', name: 'Buy 2 Get 1 Beverages', type: 'bogo', value: 0, validFrom: '2025-02-01', validTo: '2025-12-31', categories: ['Beverages'], active: true, code: 'BOGO' },
+  { id: 'O004', name: 'Essentials Discount', type: 'percentage', value: 10, validFrom: '2025-01-01', validTo: '2025-12-31', categories: ['Essentials', 'Condiments'], active: true, code: 'SAVE10' },
+  { id: 'O005', name: 'Diwali Special', type: 'percentage', value: 20, validFrom: '2025-01-01', validTo: '2025-12-31', categories: [], active: true, code: 'DIW' },
+  { id: 'O006', name: 'Lucky 11', type: 'percentage', value: 11, validFrom: '2025-01-01', validTo: '2025-12-31', categories: [], active: true, code: '11' },
+  { id: 'O007', name: 'Flat 100 Off', type: 'flat', value: 100, validFrom: '2025-01-01', validTo: '2025-12-31', categories: [], active: true, code: 'FLAT100' },
 ]
 
 const SAMPLE_BILLS: Bill[] = [
@@ -459,10 +467,50 @@ function ReceiptModal({
   onClose: () => void
   bill: Bill | null
 }) {
+  const [whatsappSent, setWhatsappSent] = useState(false)
+
   if (!bill) return null
+
+  const buildWhatsAppMessage = () => {
+    const custName = bill.customerName ?? 'Valued Customer'
+    const itemLines = Array.isArray(bill.items) ? bill.items.map(item => `- ${item?.name ?? 'Item'} x${item?.quantity ?? 0} = ${formatCurrency((item?.price ?? 0) * (item?.quantity ?? 0))}`).join('\n') : ''
+    const discLine = bill.discount > 0
+      ? `*Discount (${bill.discountName ?? 'Applied'}${bill.discountPercentage ? ' - ' + bill.discountPercentage + '%' : ''}):* -${formatCurrency(bill.discount)}`
+      : ''
+
+    return `*SuperMart - Purchase Receipt*
+
+Hi ${custName}! Thank you for shopping at SuperMart.
+
+*Bill #:* ${bill.id}
+*Date:* ${bill.date}
+
+*Items:*
+${itemLines}
+
+*Subtotal:* ${formatCurrency(bill.subtotal)}
+*Tax (5%):* ${formatCurrency(bill.tax)}
+${discLine ? discLine + '\n' : ''}*TOTAL:* ${formatCurrency(bill.total)}
+*Payment:* ${bill.paymentMethod}
+
+Welcome to the SuperMart family! Enjoy exclusive monthly offers and discounts. Stay tuned for next month's special deals!
+
+Visit us again soon!
+SuperMart - Your Trusted Supermarket`
+  }
+
+  const handleSendWhatsApp = () => {
+    const phone = bill.customerPhone ?? ''
+    const cleanPhone = phone.replace(/\D/g, '')
+    const message = encodeURIComponent(buildWhatsAppMessage())
+    const url = `https://wa.me/${cleanPhone.startsWith('91') ? cleanPhone : '91' + cleanPhone}?text=${message}`
+    window.open(url, '_blank')
+    setWhatsappSent(true)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) { setWhatsappSent(false); onClose() } }}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-center">Receipt</DialogTitle>
           <DialogDescription className="text-center text-xs">Bill #{bill.id}</DialogDescription>
@@ -478,6 +526,7 @@ function ReceiptModal({
             <span>{bill.date}</span>
           </div>
           {bill.customerName && <p className="text-xs">Customer: {bill.customerName}</p>}
+          {bill.customerPhone && <p className="text-xs text-muted-foreground">Phone: {bill.customerPhone}</p>}
           <Separator />
           <div className="space-y-1">
             <div className="flex justify-between text-xs font-semibold">
@@ -496,7 +545,12 @@ function ReceiptModal({
           <div className="space-y-0.5 text-xs">
             <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(bill.subtotal)}</span></div>
             <div className="flex justify-between"><span>Tax (5%)</span><span>{formatCurrency(bill.tax)}</span></div>
-            {bill.discount > 0 && <div className="flex justify-between text-green-600"><span>Discount</span><span>-{formatCurrency(bill.discount)}</span></div>}
+            {bill.discount > 0 && (
+              <div className="flex justify-between text-green-600">
+                <span>Discount{bill.discountName ? ` (${bill.discountName}${bill.discountPercentage ? ' - ' + bill.discountPercentage + '%' : ''})` : ''}</span>
+                <span>-{formatCurrency(bill.discount)}</span>
+              </div>
+            )}
             <Separator />
             <div className="flex justify-between font-bold text-sm"><span>TOTAL</span><span>{formatCurrency(bill.total)}</span></div>
           </div>
@@ -505,8 +559,28 @@ function ReceiptModal({
             <p className="mt-1">Thank you for shopping!</p>
           </div>
         </div>
+
+        {/* WhatsApp Notification Section */}
+        {bill.customerPhone && (
+          <div className="mt-2 border border-green-200 rounded-sm bg-green-50 p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <FiSmartphone size={14} className="text-green-600" />
+              <span className="text-xs font-semibold text-green-800">WhatsApp Notification</span>
+            </div>
+            <p className="text-[10px] text-green-700">Send receipt and welcome message to {bill.customerName ?? 'customer'} ({bill.customerPhone})</p>
+            {whatsappSent && (
+              <div className="flex items-center gap-1 text-[10px] text-green-700 bg-green-100 rounded-sm px-2 py-1">
+                <FiCheckCircle size={10} /> WhatsApp notification ready - check your browser
+              </div>
+            )}
+            <Button size="sm" className="w-full h-8 text-xs bg-green-600 hover:bg-green-700 text-white gap-1" onClick={handleSendWhatsApp}>
+              <FiSmartphone size={12} /> Send via WhatsApp
+            </Button>
+          </div>
+        )}
+
         <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => onClose()}>Close</Button>
+          <Button variant="outline" size="sm" onClick={() => { setWhatsappSent(false); onClose() }}>Close</Button>
           <Button size="sm" onClick={() => window.print()} className="gap-1"><FiPrinter size={12} /> Print</Button>
         </DialogFooter>
       </DialogContent>
@@ -516,18 +590,26 @@ function ReceiptModal({
 
 // ─── POS CHECKOUT SCREEN ──────────────────────────────────────
 function POSCheckoutScreen({
-  products, cart, setCart, onGenerateBill, sampleMode
+  products, cart, setCart, onGenerateBill, sampleMode, offers, customers, setCustomers
 }: {
   products: Product[]
   cart: CartItem[]
   setCart: React.Dispatch<React.SetStateAction<CartItem[]>>
-  onGenerateBill: (paymentMethod: string, discountCode: string) => void
+  onGenerateBill: (paymentMethod: string, discountCode: string, discountInfo: { name: string; percentage: number; amount: number } | null, customerInfo: { name: string; phone: string } | null) => void
   sampleMode: boolean
+  offers: Offer[]
+  customers: Customer[]
+  setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>
 }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [barcodeInput, setBarcodeInput] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('Cash')
   const [discountCode, setDiscountCode] = useState('')
+  const [appliedOffer, setAppliedOffer] = useState<Offer | null>(null)
+  const [discountStatus, setDiscountStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [customerPhone, setCustomerPhone] = useState('')
+  const [customerName, setCustomerName] = useState('')
+  const [customerLookupStatus, setCustomerLookupStatus] = useState<string | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const barcodeRef = useRef<HTMLInputElement>(null)
@@ -547,11 +629,58 @@ function POSCheckoutScreen({
         { ...products[9], quantity: 1 },
       ])
       setDiscountCode('SAVE10')
+      setCustomerPhone('9876543210')
+      setCustomerName('Rahul Sharma')
+      setCustomerLookupStatus('Existing customer found')
+      // Auto-apply SAVE10 for sample mode
+      const sampleOffer = offers.find(o => o.code.toUpperCase() === 'SAVE10' && o.active)
+      if (sampleOffer) {
+        setAppliedOffer(sampleOffer)
+        setDiscountStatus({ type: 'success', message: `"${sampleOffer.name}" applied - ${sampleOffer.type === 'percentage' ? sampleOffer.value + '% off' : formatCurrency(sampleOffer.value) + ' off'}` })
+      }
     }
     if (!sampleMode && sampleLoadedRef.current) {
       sampleLoadedRef.current = false
+      setAppliedOffer(null)
+      setDiscountStatus(null)
+      setCustomerPhone('')
+      setCustomerName('')
+      setCustomerLookupStatus(null)
     }
-  }, [sampleMode, products, setCart])
+  }, [sampleMode, products, setCart, offers])
+
+  const handleCustomerPhoneChange = (phone: string) => {
+    setCustomerPhone(phone)
+    if (phone.length >= 10) {
+      const found = customers.find(c => c.phone === phone)
+      if (found) {
+        setCustomerName(found.name)
+        setCustomerLookupStatus('Existing customer found')
+      } else {
+        setCustomerName('')
+        setCustomerLookupStatus('New customer - enter name below')
+      }
+    } else {
+      setCustomerLookupStatus(null)
+      setCustomerName('')
+    }
+  }
+
+  const handleApplyDiscount = () => {
+    if (!discountCode.trim()) {
+      setDiscountStatus({ type: 'error', message: 'Please enter a discount code' })
+      setAppliedOffer(null)
+      return
+    }
+    const matched = offers.find(o => o.code.toUpperCase() === discountCode.trim().toUpperCase() && o.active)
+    if (matched) {
+      setAppliedOffer(matched)
+      setDiscountStatus({ type: 'success', message: `"${matched.name}" applied - ${matched.type === 'percentage' ? matched.value + '% off' : matched.type === 'flat' ? formatCurrency(matched.value) + ' off' : 'Buy One Get One'}` })
+    } else {
+      setAppliedOffer(null)
+      setDiscountStatus({ type: 'error', message: 'Invalid or inactive discount code' })
+    }
+  }
 
   const handleBarcodeScan = () => {
     if (!barcodeInput.trim()) return
@@ -593,7 +722,13 @@ function POSCheckoutScreen({
 
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
   const tax = subtotal * 0.05
-  const discountAmount = discountCode.toUpperCase() === 'SAVE10' ? subtotal * 0.1 : 0
+  const discountAmount = appliedOffer
+    ? appliedOffer.type === 'percentage'
+      ? subtotal * (appliedOffer.value / 100)
+      : appliedOffer.type === 'flat'
+        ? Math.min(appliedOffer.value, subtotal)
+        : 0
+    : 0
   const grandTotal = subtotal + tax - discountAmount
 
   const paymentMethods = ['Cash', 'Card', 'UPI', 'Split']
@@ -669,16 +804,46 @@ function POSCheckoutScreen({
           </div>
         </ScrollArea>
 
+        {/* Customer Info */}
+        <div className="p-2 border-t border-border space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <FiSmartphone size={12} className="text-muted-foreground shrink-0" />
+            <Input value={customerPhone} onChange={(e) => handleCustomerPhoneChange(e.target.value)} placeholder="Customer mobile number" className="text-xs h-7" type="tel" />
+          </div>
+          {customerLookupStatus && (
+            <p className={`text-[10px] ml-5 ${customerLookupStatus.includes('Existing') ? 'text-green-600' : 'text-blue-600'}`}>
+              {customerLookupStatus}
+            </p>
+          )}
+          {customerPhone.length >= 10 && !customers.find(c => c.phone === customerPhone) && (
+            <div className="flex items-center gap-1.5 ml-5">
+              <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer name" className="text-xs h-7" />
+            </div>
+          )}
+          {customerName && <p className="text-[10px] ml-5 text-foreground font-medium">Customer: {customerName}</p>}
+        </div>
+
         {/* Summary */}
         <div className="p-3 border-t border-border space-y-2">
           <div className="flex gap-2">
-            <Input value={discountCode} onChange={(e) => setDiscountCode(e.target.value)} placeholder="Discount code" className="text-xs h-8" />
-            <Button variant="outline" size="sm" className="h-8 text-xs px-2 shrink-0">Apply</Button>
+            <Input value={discountCode} onChange={(e) => { setDiscountCode(e.target.value); if (discountStatus) { setDiscountStatus(null); setAppliedOffer(null) } }} placeholder="Discount code" className="text-xs h-8" onKeyDown={(e) => { if (e.key === 'Enter') handleApplyDiscount() }} />
+            <Button variant="outline" size="sm" className="h-8 text-xs px-2 shrink-0" onClick={handleApplyDiscount}>Apply</Button>
           </div>
+          {discountStatus && (
+            <p className={`text-[10px] flex items-center gap-1 ${discountStatus.type === 'success' ? 'text-green-600' : 'text-red-500'}`}>
+              {discountStatus.type === 'success' ? <FiCheckCircle size={10} /> : <FiAlertTriangle size={10} />}
+              {discountStatus.message}
+            </p>
+          )}
           <div className="space-y-1 text-xs">
             <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Tax (5%)</span><span>{formatCurrency(tax)}</span></div>
-            {discountAmount > 0 && <div className="flex justify-between text-green-600"><span>Discount (10%)</span><span>-{formatCurrency(discountAmount)}</span></div>}
+            {discountAmount > 0 && appliedOffer && (
+              <div className="flex justify-between text-green-600">
+                <span>Discount ({appliedOffer.name} - {appliedOffer.type === 'percentage' ? appliedOffer.value + '%' : 'Flat'})</span>
+                <span>-{formatCurrency(discountAmount)}</span>
+              </div>
+            )}
             <Separator />
             <div className="flex justify-between font-bold text-sm"><span>Grand Total</span><span className="text-primary">{formatCurrency(grandTotal)}</span></div>
           </div>
@@ -690,7 +855,22 @@ function POSCheckoutScreen({
             ))}
           </div>
 
-          <Button className="w-full h-9 text-sm font-semibold" disabled={cart.length === 0} onClick={() => onGenerateBill(paymentMethod, discountCode)}>
+          <Button className="w-full h-9 text-sm font-semibold" disabled={cart.length === 0} onClick={() => {
+            const discInfo = appliedOffer ? {
+              name: appliedOffer.name,
+              percentage: appliedOffer.type === 'percentage' ? appliedOffer.value : 0,
+              amount: discountAmount,
+            } : null
+            const custInfo = customerPhone.length >= 10 && customerName ? { name: customerName, phone: customerPhone } : null
+            onGenerateBill(paymentMethod, discountCode, discInfo, custInfo)
+            // Reset after bill generation
+            setDiscountCode('')
+            setAppliedOffer(null)
+            setDiscountStatus(null)
+            setCustomerPhone('')
+            setCustomerName('')
+            setCustomerLookupStatus(null)
+          }}>
             <FiCheckCircle size={14} className="mr-1" /> Generate Bill
           </Button>
         </div>
@@ -773,11 +953,18 @@ function BillHistoryScreen({ bills }: { bills: Bill[] }) {
                               </div>
                             ))}
                             <Separator />
-                            <div className="flex justify-between text-xs">
+                            <div className="flex justify-between text-xs flex-wrap gap-1">
                               <span>Subtotal: {formatCurrency(bill.subtotal)}</span>
                               <span>Tax: {formatCurrency(bill.tax)}</span>
-                              {bill.discount > 0 && <span className="text-green-600">Discount: -{formatCurrency(bill.discount)}</span>}
+                              {bill.discount > 0 && (
+                                <span className="text-green-600">
+                                  Discount{bill.discountName ? ` (${bill.discountName}${bill.discountPercentage ? ' - ' + bill.discountPercentage + '%' : ''})` : ''}: -{formatCurrency(bill.discount)}
+                                </span>
+                              )}
                             </div>
+                            {bill.customerPhone && (
+                              <p className="text-[10px] text-muted-foreground mt-1">Customer Phone: {bill.customerPhone}</p>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -959,16 +1146,25 @@ function DiscountsScreen({
 }) {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editOffer, setEditOffer] = useState<Offer | null>(null)
-  const [form, setForm] = useState({ name: '', type: 'percentage' as 'percentage' | 'flat' | 'bogo', value: '', validFrom: '', validTo: '', categories: '' })
+  const [form, setForm] = useState({ name: '', type: 'percentage' as 'percentage' | 'flat' | 'bogo', value: '', validFrom: '', validTo: '', categories: '', code: '' })
+
+  const generateCode = (name: string, type: string, value: string): string => {
+    if (!name) return ''
+    const words = name.toUpperCase().split(/\s+/)
+    const prefix = words.length > 1 ? words.map(w => w[0] ?? '').join('').slice(0, 4) : name.toUpperCase().slice(0, 4)
+    if (type === 'percentage' && value) return prefix + value
+    if (type === 'flat' && value) return 'FLAT' + value
+    return prefix
+  }
 
   const openAddModal = () => {
-    setForm({ name: '', type: 'percentage', value: '', validFrom: '', validTo: '', categories: '' })
+    setForm({ name: '', type: 'percentage', value: '', validFrom: '', validTo: '', categories: '', code: '' })
     setEditOffer(null)
     setShowAddModal(true)
   }
 
   const openEditModal = (offer: Offer) => {
-    setForm({ name: offer.name, type: offer.type, value: String(offer.value), validFrom: offer.validFrom, validTo: offer.validTo, categories: Array.isArray(offer.categories) ? offer.categories.join(', ') : '' })
+    setForm({ name: offer.name, type: offer.type, value: String(offer.value), validFrom: offer.validFrom, validTo: offer.validTo, categories: Array.isArray(offer.categories) ? offer.categories.join(', ') : '', code: offer.code ?? '' })
     setEditOffer(offer)
     setShowAddModal(true)
   }
@@ -976,10 +1172,11 @@ function DiscountsScreen({
   const handleSave = () => {
     if (!form.name || !form.validFrom || !form.validTo) return
     const cats = form.categories.split(',').map(c => c.trim()).filter(Boolean)
+    const code = form.code.trim() || generateCode(form.name, form.type, form.value)
     if (editOffer) {
-      setOffers(prev => prev.map(o => o.id === editOffer.id ? { ...o, name: form.name, type: form.type, value: Number(form.value), validFrom: form.validFrom, validTo: form.validTo, categories: cats } : o))
+      setOffers(prev => prev.map(o => o.id === editOffer.id ? { ...o, name: form.name, type: form.type, value: Number(form.value), validFrom: form.validFrom, validTo: form.validTo, categories: cats, code } : o))
     } else {
-      const newOffer: Offer = { id: 'O' + String(Math.floor(Math.random() * 9000) + 1000), name: form.name, type: form.type, value: Number(form.value), validFrom: form.validFrom, validTo: form.validTo, categories: cats, active: true }
+      const newOffer: Offer = { id: 'O' + String(Math.floor(Math.random() * 9000) + 1000), name: form.name, type: form.type, value: Number(form.value), validFrom: form.validFrom, validTo: form.validTo, categories: cats, active: true, code }
       setOffers(prev => [...prev, newOffer])
     }
     setShowAddModal(false)
@@ -1032,6 +1229,10 @@ function DiscountsScreen({
                 <Switch checked={offer.active} onCheckedChange={() => toggleOffer(offer.id)} />
               </div>
               <div className="space-y-1.5 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-muted-foreground">Code:</span>
+                  <Badge variant="secondary" className="text-[10px] font-mono font-bold tracking-wider">{offer.code}</Badge>
+                </div>
                 {offer.type !== 'bogo' && (
                   <div className="flex items-center gap-1.5">
                     <span className="text-muted-foreground">Value:</span>
@@ -1091,6 +1292,14 @@ function DiscountsScreen({
                 <Label className="text-xs">Valid To *</Label>
                 <Input type="date" value={form.validTo} onChange={(e) => setForm(prev => ({ ...prev, validTo: e.target.value }))} className="text-sm h-8 mt-1" />
               </div>
+            </div>
+            <div>
+              <Label className="text-xs">Discount Code</Label>
+              <div className="flex gap-2 mt-1">
+                <Input value={form.code} onChange={(e) => setForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))} placeholder="e.g. SAVE10" className="text-sm h-8 font-mono" />
+                <Button variant="outline" size="sm" className="h-8 text-xs px-2 shrink-0" onClick={() => setForm(prev => ({ ...prev, code: generateCode(prev.name, prev.type, prev.value) }))}>Auto</Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Leave blank to auto-generate. This code is used at POS checkout.</p>
             </div>
             <div>
               <Label className="text-xs">Applicable Categories (comma-separated)</Label>
@@ -1489,11 +1698,11 @@ export default function Page() {
   const [receiptBill, setReceiptBill] = useState<Bill | null>(null)
   const [showReceipt, setShowReceipt] = useState(false)
 
-  const handleGenerateBill = (paymentMethod: string, discountCode: string) => {
+  const handleGenerateBill = (paymentMethod: string, discountCode: string, discountInfo: { name: string; percentage: number; amount: number } | null, customerInfo: { name: string; phone: string } | null) => {
     if (cart.length === 0) return
     const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
     const tax = subtotal * 0.05
-    const discountAmount = discountCode.toUpperCase() === 'SAVE10' ? subtotal * 0.1 : 0
+    const discountAmount = discountInfo?.amount ?? 0
     const total = subtotal + tax - discountAmount
 
     const billId = 'B' + String(Math.floor(Math.random() * 9000) + 1000)
@@ -1510,6 +1719,11 @@ export default function Page() {
       total,
       paymentMethod,
       status: 'Completed',
+      customerName: customerInfo?.name,
+      customerPhone: customerInfo?.phone,
+      discountCode: discountCode || undefined,
+      discountName: discountInfo?.name,
+      discountPercentage: discountInfo?.percentage,
     }
 
     // Decrease stock
@@ -1518,6 +1732,37 @@ export default function Page() {
       if (cartItem) return { ...p, stock: Math.max(0, p.stock - cartItem.quantity) }
       return p
     }))
+
+    // Update customer stats if customer info is provided
+    if (customerInfo) {
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+      const existingCustomer = customers.find(c => c.phone === customerInfo.phone)
+      if (existingCustomer) {
+        setCustomers(prev => prev.map(c => {
+          if (c.phone === customerInfo.phone) {
+            return {
+              ...c,
+              totalVisits: c.totalVisits + 1,
+              totalSpend: c.totalSpend + total,
+              lastVisit: todayStr,
+              loyaltyPoints: c.loyaltyPoints + Math.floor(total / 10),
+            }
+          }
+          return c
+        }))
+      } else {
+        const newCustomer: Customer = {
+          id: 'C' + String(Math.floor(Math.random() * 9000) + 1000),
+          name: customerInfo.name,
+          phone: customerInfo.phone,
+          totalVisits: 1,
+          totalSpend: total,
+          lastVisit: todayStr,
+          loyaltyPoints: Math.floor(total / 10),
+        }
+        setCustomers(prev => [...prev, newCustomer])
+      }
+    }
 
     setBills(prev => [newBill, ...prev])
     setReceiptBill(newBill)
@@ -1564,7 +1809,7 @@ export default function Page() {
           {/* Screen Content */}
           <div className="p-4">
             {screen === 'pos' && (
-              <POSCheckoutScreen products={products} cart={cart} setCart={setCart} onGenerateBill={handleGenerateBill} sampleMode={sampleMode} />
+              <POSCheckoutScreen products={products} cart={cart} setCart={setCart} onGenerateBill={handleGenerateBill} sampleMode={sampleMode} offers={offers} customers={customers} setCustomers={setCustomers} />
             )}
             {screen === 'bills' && (
               <BillHistoryScreen bills={bills} />
