@@ -241,3 +241,208 @@ export function assignCategoryColors(categories: CategoryRow[]): Array<CategoryR
     color: CHART_COLORS[i % CHART_COLORS.length],
   }))
 }
+
+// ─── ANALYTICS FULL EXPORT ─────────────────────────────────────
+
+export interface AnalyticsExportData {
+  todayRevenue: number
+  totalTransactions: number
+  avgBillValue: number
+  topProductName: string
+  topProductUnits: number
+  weeklySales: Array<{ day: string; revenue: number }>
+  categoryDist: Array<{ name: string; value: number }>
+  topProducts: Array<{ name: string; qty: number; revenue: number }>
+  stockDetails: Array<{ name: string; barcode: string; category: string; price: number; stock: number; unit: string; status: string }>
+}
+
+/**
+ * Export full analytics dashboard data to Excel with 5 sheets:
+ * 1. Dashboard Summary - Key metrics
+ * 2. Weekly Sales - Day-wise revenue
+ * 3. Category Distribution - Category percentages
+ * 4. Top Selling Products - Product sales table
+ * 5. Stock Inventory - Current stock quantities and status
+ */
+export async function exportAnalyticsExcel(data: AnalyticsExportData): Promise<void> {
+  const XLSX = await loadXLSX()
+  if (!XLSX) throw new Error('XLSX library not available')
+
+  const wb = XLSX.utils.book_new()
+  const today = new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })
+
+  // Sheet 1: Dashboard Summary
+  const summaryData = [
+    ['SuperMart - Analytics Report'],
+    [`Generated: ${today}`],
+    [''],
+    ['Metric', 'Value'],
+    ['Today Revenue', data.todayRevenue],
+    ['Total Transactions', data.totalTransactions],
+    ['Average Bill Value', data.avgBillValue],
+    ['Top Product', data.topProductName],
+    ['Top Product Units Sold', data.topProductUnits],
+  ]
+  const ws1 = XLSX.utils.aoa_to_sheet(summaryData)
+  ws1['!cols'] = [{ wch: 25 }, { wch: 20 }]
+  ws1['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }]
+  XLSX.utils.book_append_sheet(wb, ws1, 'Dashboard Summary')
+
+  // Sheet 2: Weekly Sales
+  const weeklySalesArr: any[][] = [['Day', 'Revenue (INR)']]
+  data.weeklySales.forEach(d => weeklySalesArr.push([d.day, d.revenue]))
+  weeklySalesArr.push(['', ''])
+  weeklySalesArr.push(['Total', data.weeklySales.reduce((s, d) => s + d.revenue, 0)])
+  const ws2 = XLSX.utils.aoa_to_sheet(weeklySalesArr)
+  ws2['!cols'] = [{ wch: 15 }, { wch: 18 }]
+  XLSX.utils.book_append_sheet(wb, ws2, 'Weekly Sales')
+
+  // Sheet 3: Category Distribution
+  const catArr: any[][] = [['Category', 'Percentage (%)']]
+  data.categoryDist.forEach(c => catArr.push([c.name, c.value]))
+  const ws3 = XLSX.utils.aoa_to_sheet(catArr)
+  ws3['!cols'] = [{ wch: 20 }, { wch: 18 }]
+  XLSX.utils.book_append_sheet(wb, ws3, 'Category Distribution')
+
+  // Sheet 4: Top Selling Products
+  const prodArr: any[][] = [['#', 'Product', 'Units Sold', 'Revenue (INR)']]
+  data.topProducts.forEach((p, i) => prodArr.push([i + 1, p.name, p.qty, p.revenue]))
+  const ws4 = XLSX.utils.aoa_to_sheet(prodArr)
+  ws4['!cols'] = [{ wch: 5 }, { wch: 25 }, { wch: 12 }, { wch: 18 }]
+  XLSX.utils.book_append_sheet(wb, ws4, 'Top Selling Products')
+
+  // Sheet 5: Stock Inventory
+  const stockArr: any[][] = [['Product', 'Barcode', 'Category', 'Price (INR)', 'Stock Qty', 'Unit', 'Status']]
+  data.stockDetails.forEach(p => stockArr.push([p.name, p.barcode, p.category, p.price, p.stock, p.unit, p.status]))
+  stockArr.push(['', '', '', '', '', '', ''])
+  const totalStock = data.stockDetails.reduce((s, p) => s + p.stock, 0)
+  const lowStockCount = data.stockDetails.filter(p => p.stock < 20).length
+  stockArr.push(['Total Items', String(data.stockDetails.length), '', '', totalStock, '', `${lowStockCount} Low Stock`])
+  const ws5 = XLSX.utils.aoa_to_sheet(stockArr)
+  ws5['!cols'] = [{ wch: 25 }, { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 12 }]
+  XLSX.utils.book_append_sheet(wb, ws5, 'Stock Inventory')
+
+  XLSX.writeFile(wb, `SuperMart_Analytics_${new Date().toISOString().split('T')[0]}.xlsx`)
+}
+
+// ─── CUSTOMER EXPORT ────────────────────────────────────────────
+
+export interface CustomerExportRow {
+  id: string
+  name: string
+  phone: string
+  totalVisits: number
+  totalSpend: number
+  lastVisit: string
+  loyaltyPoints: number
+}
+
+/**
+ * Export customer list to Excel
+ */
+export async function exportCustomersExcel(customers: CustomerExportRow[]): Promise<void> {
+  const XLSX = await loadXLSX()
+  if (!XLSX) throw new Error('XLSX library not available')
+
+  const wb = XLSX.utils.book_new()
+  const today = new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })
+
+  const custArr: any[][] = [
+    ['SuperMart - Customer Data'],
+    [`Exported: ${today}`],
+    [''],
+    ['Customer ID', 'Name', 'Phone', 'Total Visits', 'Total Spend (INR)', 'Last Visit', 'Loyalty Points'],
+  ]
+  customers.forEach(c => custArr.push([c.id, c.name, c.phone, c.totalVisits, c.totalSpend, c.lastVisit, c.loyaltyPoints]))
+  custArr.push(['', '', '', '', '', '', ''])
+  custArr.push(['Total Customers', String(customers.length), '', '', customers.reduce((s, c) => s + c.totalSpend, 0), '', customers.reduce((s, c) => s + c.loyaltyPoints, 0)])
+
+  const ws = XLSX.utils.aoa_to_sheet(custArr)
+  ws['!cols'] = [{ wch: 14 }, { wch: 20 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 14 }, { wch: 14 }]
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }]
+  XLSX.utils.book_append_sheet(wb, ws, 'Customers')
+
+  XLSX.writeFile(wb, `SuperMart_Customers_${new Date().toISOString().split('T')[0]}.xlsx`)
+}
+
+/**
+ * Download a customer import template
+ */
+export async function downloadCustomerTemplate(): Promise<void> {
+  const XLSX = await loadXLSX()
+  if (!XLSX) throw new Error('XLSX library not available')
+
+  const wb = XLSX.utils.book_new()
+  const templateData = [
+    ['Name', 'Phone', 'Total Visits', 'Total Spend', 'Last Visit (YYYY-MM-DD)', 'Loyalty Points'],
+    ['Rahul Sharma', '9876543210', 45, 32500, '2025-02-26', 1625],
+    ['Priya Patel', '9876543211', 32, 28700, '2025-02-25', 1435],
+    ['', '', '', '', '', ''],
+    ['Instructions:'],
+    ['- Fill customer data starting from row 2'],
+    ['- Name and Phone are required fields'],
+    ['- Phone must be 10 digits (no country code)'],
+    ['- Leave Total Visits, Total Spend, Last Visit, Loyalty Points as 0 for new customers'],
+    ['- Save as .xlsx and import'],
+  ]
+  const ws = XLSX.utils.aoa_to_sheet(templateData)
+  ws['!cols'] = [{ wch: 20 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 14 }]
+  XLSX.utils.book_append_sheet(wb, ws, 'Customers')
+
+  XLSX.writeFile(wb, 'SuperMart_Customer_Import_Template.xlsx')
+}
+
+/**
+ * Import customers from Excel file
+ */
+export async function importCustomersExcel(file: File): Promise<CustomerExportRow[]> {
+  const XLSX = await loadXLSX()
+  if (!XLSX) throw new Error('XLSX library not available')
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer)
+        const workbook = XLSX.read(data, { type: 'array' })
+        const sheetName = workbook.SheetNames[0]
+        if (!sheetName) { reject(new Error('No sheets found')); return }
+
+        const ws = workbook.Sheets[sheetName]
+        const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 })
+
+        const customers: CustomerExportRow[] = []
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i]
+          if (!row || !row[0] || !row[1]) continue
+          const name = String(row[0]).trim()
+          const phone = String(row[1]).trim().replace(/\D/g, '')
+          if (!name || phone.length < 10) continue
+          // Skip instruction rows
+          if (name.toLowerCase().startsWith('instructions') || name.startsWith('-')) continue
+
+          customers.push({
+            id: 'C' + String(Math.floor(Math.random() * 9000) + 1000),
+            name,
+            phone: phone.slice(-10),
+            totalVisits: Number(row[2]) || 0,
+            totalSpend: Number(row[3]) || 0,
+            lastVisit: row[4] ? String(row[4]).trim() : 'N/A',
+            loyaltyPoints: Number(row[5]) || 0,
+          })
+        }
+
+        if (customers.length === 0) {
+          reject(new Error('No valid customer data found. Ensure Name and Phone columns are filled.'))
+          return
+        }
+
+        resolve(customers)
+      } catch (err) {
+        reject(new Error('Failed to parse Excel file. Please use the template format.'))
+      }
+    }
+    reader.onerror = () => reject(new Error('Failed to read file'))
+    reader.readAsArrayBuffer(file)
+  })
+}

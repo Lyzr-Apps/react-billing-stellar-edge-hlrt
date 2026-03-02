@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { callAIAgent } from '@/lib/aiAgent'
-import { downloadExcelTemplate, importExcelFile, assignCategoryColors, type ExcelSalesData } from '@/lib/excelUtils'
+import { downloadExcelTemplate, importExcelFile, assignCategoryColors, exportAnalyticsExcel, exportCustomersExcel, downloadCustomerTemplate, importCustomersExcel, type ExcelSalesData, type AnalyticsExportData, type CustomerExportRow } from '@/lib/excelUtils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -1319,7 +1319,7 @@ function DiscountsScreen({
 }
 
 // ─── ANALYTICS DASHBOARD SCREEN ──────────────────────────────
-function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
+function AnalyticsDashboardScreen({ bills, products }: { bills: Bill[]; products: Product[] }) {
   const [chatOpen, setChatOpen] = useState(false)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
 
@@ -1333,7 +1333,8 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
   const useImported = importedData !== null
 
   // Bills-derived data (default)
-  const todaysBills = bills.filter(b => (b.date ?? '').includes('2025-02-26'))
+  const todayStr = new Date().toISOString().split('T')[0]
+  const todaysBills = bills.filter(b => (b.date ?? '').includes(todayStr) || (b.date ?? '').includes('2025-02-26'))
   const todayRevenue = todaysBills.reduce((sum, b) => sum + (b.total ?? 0), 0)
   const totalTransactions = bills.length
   const totalRevenue = bills.reduce((sum, b) => sum + (b.total ?? 0), 0)
@@ -1347,7 +1348,7 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
     itemCount[name].qty += item?.quantity ?? 0
     itemCount[name].revenue += (item?.price ?? 0) * (item?.quantity ?? 0)
   })
-  const billTopProducts = Object.values(itemCount).sort((a, b) => b.revenue - a.revenue).slice(0, 5)
+  const billTopProducts = Object.values(itemCount).sort((a, b) => b.revenue - a.revenue).slice(0, 10)
 
   // Decide which data to render in charts
   const activeDailySales: Array<{ day: string; revenue: number }> = useImported && importedData.dailySales.length > 0
@@ -1364,10 +1365,44 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
 
   // Imported stats overrides
   const importedTotalRevenue = useImported ? importedData.dailySales.reduce((s, d) => s + d.revenue, 0) : 0
-  const importedTotalProducts = useImported ? importedData.productSales.length : 0
   const importedTopProduct = useImported && importedData.productSales.length > 0 ? importedData.productSales[0] : null
 
   const maxDailySale = Math.max(...activeDailySales.map(d => d.revenue), 1)
+
+  // Handle FULL analytics export with all live data
+  const handleExportAnalytics = useCallback(async () => {
+    setDownloadStatus({ type: 'loading', message: 'Exporting analytics data...' })
+    try {
+      const stockDetails = products.map(p => ({
+        name: p.name,
+        barcode: p.barcode,
+        category: p.category,
+        price: p.price,
+        stock: p.stock,
+        unit: p.unit,
+        status: p.stock < 20 ? 'Low Stock' : p.stock < 50 ? 'Medium' : 'In Stock',
+      }))
+
+      const exportData: AnalyticsExportData = {
+        todayRevenue: useImported ? importedTotalRevenue : todayRevenue,
+        totalTransactions: useImported ? activeDailySales.length : totalTransactions,
+        avgBillValue: useImported ? (activeDailySales.length > 0 ? importedTotalRevenue / activeDailySales.length : 0) : avgBillValue,
+        topProductName: useImported ? (importedTopProduct?.product ?? 'N/A') : (billTopProducts[0]?.name ?? 'N/A'),
+        topProductUnits: useImported ? (importedTopProduct?.unitsSold ?? 0) : (billTopProducts[0]?.qty ?? 0),
+        weeklySales: activeDailySales,
+        categoryDist: activeCategoryDist.map(c => ({ name: c.name, value: c.value })),
+        topProducts: activeTopProducts,
+        stockDetails,
+      }
+
+      await exportAnalyticsExcel(exportData)
+      setDownloadStatus({ type: 'success', message: 'Analytics report exported successfully' })
+      setTimeout(() => setDownloadStatus(null), 3000)
+    } catch (err) {
+      setDownloadStatus({ type: 'error', message: err instanceof Error ? err.message : 'Export failed' })
+      setTimeout(() => setDownloadStatus(null), 4000)
+    }
+  }, [products, useImported, importedTotalRevenue, todayRevenue, activeDailySales, totalTransactions, avgBillValue, importedTopProduct, billTopProducts, activeCategoryDist, activeTopProducts])
 
   // Handle template download
   const handleDownloadTemplate = useCallback(async () => {
@@ -1387,14 +1422,8 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
     const file = e.target.files?.[0]
     if (!file) return
 
-    // Validate file type
-    const validTypes = [
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-excel',
-      'text/csv',
-    ]
     const isValidExt = file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')
-    if (!validTypes.includes(file.type) && !isValidExt) {
+    if (!isValidExt) {
       setImportStatus({ type: 'error', message: 'Please upload an Excel file (.xlsx, .xls) or CSV file' })
       setTimeout(() => setImportStatus(null), 4000)
       return
@@ -1404,7 +1433,6 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
     try {
       const data = await importExcelFile(file)
 
-      // Validate that at least one sheet has data
       if (data.dailySales.length === 0 && data.categoryDistribution.length === 0 && data.productSales.length === 0) {
         setImportStatus({ type: 'error', message: 'No data found in the Excel file. Please use the template format.' })
         setTimeout(() => setImportStatus(null), 4000)
@@ -1423,7 +1451,6 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
       setTimeout(() => setImportStatus(null), 4000)
     }
 
-    // Reset file input
     if (fileInputRef.current) fileInputRef.current.value = ''
   }, [])
 
@@ -1451,8 +1478,11 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
               <FiXCircle size={12} /> Clear Import
             </Button>
           )}
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1 bg-green-50 border-green-200 text-green-700 hover:bg-green-100" onClick={handleExportAnalytics}>
+            <FiDownload size={12} /> Export Report
+          </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={handleDownloadTemplate}>
-            <FiDownload size={12} /> Download Template
+            <FiDownload size={12} /> Import Template
           </Button>
           <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => fileInputRef.current?.click()}>
             <FiUpload size={12} /> Import Excel
@@ -1494,33 +1524,6 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
            <FiAlertTriangle size={12} />}
           {importStatus.message}
         </div>
-      )}
-
-      {/* Excel Info Banner */}
-      {!useImported && (
-        <Card className="border-dashed border-primary/30 bg-primary/5">
-          <CardContent className="p-3">
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-sm bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                <FiFile size={16} className="text-primary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-foreground">Import Sales Data from Excel</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
-                  Download the template, fill in your sales data (daily sales, category distribution, product sales), then import the file to see analytics charts update with your data.
-                </p>
-                <div className="flex items-center gap-2 mt-2">
-                  <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1 px-2" onClick={handleDownloadTemplate}>
-                    <FiDownload size={10} /> Step 1: Download Template
-                  </Button>
-                  <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1 px-2" onClick={() => fileInputRef.current?.click()}>
-                    <FiUpload size={10} /> Step 2: Import Filled File
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       )}
 
       {/* Stat Cards */}
@@ -1682,6 +1685,8 @@ function CustomerManagementScreen({
   const [showAddModal, setShowAddModal] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [form, setForm] = useState({ name: '', phone: '' })
+  const [excelStatus, setExcelStatus] = useState<{ type: 'success' | 'error' | 'loading'; message: string } | null>(null)
+  const custFileInputRef = useRef<HTMLInputElement>(null)
 
   const filteredCustomers = customers.filter(c =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1700,15 +1705,116 @@ function CustomerManagementScreen({
     return bills.filter(b => b.customerName === name)
   }
 
+  const handleExportCustomers = useCallback(async () => {
+    setExcelStatus({ type: 'loading', message: 'Exporting customers...' })
+    try {
+      await exportCustomersExcel(customers)
+      setExcelStatus({ type: 'success', message: `Exported ${customers.length} customers successfully` })
+      setTimeout(() => setExcelStatus(null), 3000)
+    } catch (err) {
+      setExcelStatus({ type: 'error', message: err instanceof Error ? err.message : 'Export failed' })
+      setTimeout(() => setExcelStatus(null), 4000)
+    }
+  }, [customers])
+
+  const handleDownloadCustTemplate = useCallback(async () => {
+    setExcelStatus({ type: 'loading', message: 'Preparing import template...' })
+    try {
+      await downloadCustomerTemplate()
+      setExcelStatus({ type: 'success', message: 'Template downloaded - fill and import' })
+      setTimeout(() => setExcelStatus(null), 3000)
+    } catch (err) {
+      setExcelStatus({ type: 'error', message: err instanceof Error ? err.message : 'Download failed' })
+      setTimeout(() => setExcelStatus(null), 4000)
+    }
+  }, [])
+
+  const handleImportCustomers = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const isValidExt = file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')
+    if (!isValidExt) {
+      setExcelStatus({ type: 'error', message: 'Please upload an Excel file (.xlsx, .xls)' })
+      setTimeout(() => setExcelStatus(null), 4000)
+      return
+    }
+
+    setExcelStatus({ type: 'loading', message: `Importing "${file.name}"...` })
+    try {
+      const imported = await importCustomersExcel(file)
+      // Merge: skip duplicates by phone number
+      const existingPhones = new Set(customers.map(c => c.phone))
+      let newCount = 0
+      let skipCount = 0
+      const newCustomers: Customer[] = []
+      imported.forEach(ic => {
+        if (existingPhones.has(ic.phone)) {
+          skipCount++
+        } else {
+          existingPhones.add(ic.phone)
+          newCount++
+          newCustomers.push({
+            id: ic.id,
+            name: ic.name,
+            phone: ic.phone,
+            totalVisits: ic.totalVisits,
+            totalSpend: ic.totalSpend,
+            lastVisit: ic.lastVisit,
+            loyaltyPoints: ic.loyaltyPoints,
+          })
+        }
+      })
+      if (newCustomers.length > 0) {
+        setCustomers(prev => [...prev, ...newCustomers])
+      }
+      setExcelStatus({ type: 'success', message: `Imported ${newCount} new customers${skipCount > 0 ? `, ${skipCount} duplicates skipped` : ''}` })
+      setTimeout(() => setExcelStatus(null), 5000)
+    } catch (err) {
+      setExcelStatus({ type: 'error', message: err instanceof Error ? err.message : 'Import failed' })
+      setTimeout(() => setExcelStatus(null), 4000)
+    }
+    if (custFileInputRef.current) custFileInputRef.current.value = ''
+  }, [customers, setCustomers])
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-semibold">Customer Management</h2>
           <p className="text-xs text-muted-foreground">{customers.length} customers</p>
         </div>
-        <Button size="sm" onClick={() => { setForm({ name: '', phone: '' }); setShowAddModal(true) }} className="h-8 gap-1"><FiPlus size={12} /> Add Customer</Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1 bg-green-50 border-green-200 text-green-700 hover:bg-green-100" onClick={handleExportCustomers}>
+            <FiDownload size={12} /> Export
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={handleDownloadCustTemplate}>
+            <FiDownload size={12} /> Import Template
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => custFileInputRef.current?.click()}>
+            <FiUpload size={12} /> Import
+          </Button>
+          <input ref={custFileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleImportCustomers} className="hidden" />
+          <Button size="sm" onClick={() => { setForm({ name: '', phone: '' }); setShowAddModal(true) }} className="h-8 gap-1">
+            <FiPlus size={12} /> Add Customer
+          </Button>
+        </div>
       </div>
+
+      {/* Excel Status */}
+      {excelStatus && (
+        <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-sm border ${
+          excelStatus.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' :
+          excelStatus.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' :
+          'bg-blue-50 border-blue-200 text-blue-700'
+        }`}>
+          {excelStatus.type === 'loading' ? <FiRefreshCw size={12} className="animate-spin" /> :
+           excelStatus.type === 'success' ? <FiCheckCircle size={12} /> :
+           <FiAlertTriangle size={12} />}
+          {excelStatus.message}
+        </div>
+      )}
+
       <div className="relative">
         <FiSearch size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <Input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search by name or phone..." className="pl-8 text-sm h-9" />
@@ -2013,7 +2119,7 @@ export default function Page() {
               <DiscountsScreen offers={offers} setOffers={setOffers} />
             )}
             {screen === 'analytics' && (
-              <AnalyticsDashboardScreen bills={bills} />
+              <AnalyticsDashboardScreen bills={bills} products={products} />
             )}
             {screen === 'customers' && (
               <CustomerManagementScreen customers={customers} setCustomers={setCustomers} bills={bills} />
