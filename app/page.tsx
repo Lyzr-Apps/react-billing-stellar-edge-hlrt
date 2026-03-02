@@ -1,7 +1,8 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { callAIAgent } from '@/lib/aiAgent'
+import { downloadExcelTemplate, importExcelFile, assignCategoryColors, type ExcelSalesData } from '@/lib/excelUtils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,7 +18,8 @@ import {
   FiTag, FiBarChart2, FiClock, FiEdit2, FiPrinter,
   FiCheckCircle, FiAlertTriangle, FiPercent, FiHash,
   FiUser, FiPhone, FiCalendar, FiActivity,
-  FiChevronDown, FiChevronUp, FiRefreshCw, FiMenu, FiSmartphone
+  FiChevronDown, FiChevronUp, FiRefreshCw, FiMenu, FiSmartphone,
+  FiDownload, FiUpload, FiFile, FiXCircle
 } from 'react-icons/fi'
 
 // ─── AGENT IDS ────────────────────────────────────────────────
@@ -1321,6 +1323,16 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
   const [chatOpen, setChatOpen] = useState(false)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
 
+  // Excel import state
+  const [importedData, setImportedData] = useState<ExcelSalesData | null>(null)
+  const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error' | 'loading'; message: string } | null>(null)
+  const [downloadStatus, setDownloadStatus] = useState<{ type: 'success' | 'error' | 'loading'; message: string } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Determine data source: imported Excel data or bills-derived data
+  const useImported = importedData !== null
+
+  // Bills-derived data (default)
   const todaysBills = bills.filter(b => (b.date ?? '').includes('2025-02-26'))
   const todayRevenue = todaysBills.reduce((sum, b) => sum + (b.total ?? 0), 0)
   const totalTransactions = bills.length
@@ -1335,16 +1347,181 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
     itemCount[name].qty += item?.quantity ?? 0
     itemCount[name].revenue += (item?.price ?? 0) * (item?.quantity ?? 0)
   })
-  const topProducts = Object.values(itemCount).sort((a, b) => b.revenue - a.revenue).slice(0, 5)
+  const billTopProducts = Object.values(itemCount).sort((a, b) => b.revenue - a.revenue).slice(0, 5)
 
-  const maxDailySale = Math.max(...DAILY_SALES.map(d => d.revenue))
+  // Decide which data to render in charts
+  const activeDailySales: Array<{ day: string; revenue: number }> = useImported && importedData.dailySales.length > 0
+    ? importedData.dailySales
+    : DAILY_SALES
+
+  const activeCategoryDist: Array<{ name: string; value: number; color: string }> = useImported && importedData.categoryDistribution.length > 0
+    ? assignCategoryColors(importedData.categoryDistribution)
+    : CATEGORY_DIST
+
+  const activeTopProducts: Array<{ name: string; qty: number; revenue: number }> = useImported && importedData.productSales.length > 0
+    ? importedData.productSales.slice(0, 10).map(p => ({ name: p.product, qty: p.unitsSold, revenue: p.revenue }))
+    : billTopProducts
+
+  // Imported stats overrides
+  const importedTotalRevenue = useImported ? importedData.dailySales.reduce((s, d) => s + d.revenue, 0) : 0
+  const importedTotalProducts = useImported ? importedData.productSales.length : 0
+  const importedTopProduct = useImported && importedData.productSales.length > 0 ? importedData.productSales[0] : null
+
+  const maxDailySale = Math.max(...activeDailySales.map(d => d.revenue), 1)
+
+  // Handle template download
+  const handleDownloadTemplate = useCallback(async () => {
+    setDownloadStatus({ type: 'loading', message: 'Preparing Excel template...' })
+    try {
+      await downloadExcelTemplate()
+      setDownloadStatus({ type: 'success', message: 'Template downloaded successfully' })
+      setTimeout(() => setDownloadStatus(null), 3000)
+    } catch (err) {
+      setDownloadStatus({ type: 'error', message: err instanceof Error ? err.message : 'Download failed' })
+      setTimeout(() => setDownloadStatus(null), 4000)
+    }
+  }, [])
+
+  // Handle file import
+  const handleFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate file type
+    const validTypes = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'text/csv',
+    ]
+    const isValidExt = file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')
+    if (!validTypes.includes(file.type) && !isValidExt) {
+      setImportStatus({ type: 'error', message: 'Please upload an Excel file (.xlsx, .xls) or CSV file' })
+      setTimeout(() => setImportStatus(null), 4000)
+      return
+    }
+
+    setImportStatus({ type: 'loading', message: `Importing "${file.name}"...` })
+    try {
+      const data = await importExcelFile(file)
+
+      // Validate that at least one sheet has data
+      if (data.dailySales.length === 0 && data.categoryDistribution.length === 0 && data.productSales.length === 0) {
+        setImportStatus({ type: 'error', message: 'No data found in the Excel file. Please use the template format.' })
+        setTimeout(() => setImportStatus(null), 4000)
+        return
+      }
+
+      setImportedData(data)
+      const sheetInfo = []
+      if (data.dailySales.length > 0) sheetInfo.push(`${data.dailySales.length} daily entries`)
+      if (data.categoryDistribution.length > 0) sheetInfo.push(`${data.categoryDistribution.length} categories`)
+      if (data.productSales.length > 0) sheetInfo.push(`${data.productSales.length} products`)
+      setImportStatus({ type: 'success', message: `Data imported: ${sheetInfo.join(', ')}` })
+      setTimeout(() => setImportStatus(null), 5000)
+    } catch (err) {
+      setImportStatus({ type: 'error', message: err instanceof Error ? err.message : 'Import failed' })
+      setTimeout(() => setImportStatus(null), 4000)
+    }
+
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [])
+
+  const handleClearImport = () => {
+    setImportedData(null)
+    setImportStatus({ type: 'success', message: 'Switched back to live POS data' })
+    setTimeout(() => setImportStatus(null), 3000)
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Analytics Dashboard</h2>
-        <Button size="sm" onClick={() => setChatOpen(true)} className="h-8 gap-1"><FiMessageCircle size={12} /> Ask Analytics</Button>
+      {/* Header with actions */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-lg font-semibold">Analytics Dashboard</h2>
+          {useImported && (
+            <p className="text-[10px] text-primary font-medium flex items-center gap-1 mt-0.5">
+              <FiFile size={10} /> Viewing imported Excel data
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {useImported && (
+            <Button variant="outline" size="sm" className="h-8 text-xs gap-1 text-destructive border-destructive/30 hover:bg-destructive/5" onClick={handleClearImport}>
+              <FiXCircle size={12} /> Clear Import
+            </Button>
+          )}
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={handleDownloadTemplate}>
+            <FiDownload size={12} /> Download Template
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => fileInputRef.current?.click()}>
+            <FiUpload size={12} /> Import Excel
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={handleFileImport}
+            className="hidden"
+          />
+          <Button size="sm" onClick={() => setChatOpen(true)} className="h-8 gap-1">
+            <FiMessageCircle size={12} /> Ask Analytics
+          </Button>
+        </div>
       </div>
+
+      {/* Status Messages */}
+      {downloadStatus && (
+        <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-sm border ${
+          downloadStatus.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' :
+          downloadStatus.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' :
+          'bg-blue-50 border-blue-200 text-blue-700'
+        }`}>
+          {downloadStatus.type === 'loading' ? <FiRefreshCw size={12} className="animate-spin" /> :
+           downloadStatus.type === 'success' ? <FiCheckCircle size={12} /> :
+           <FiAlertTriangle size={12} />}
+          {downloadStatus.message}
+        </div>
+      )}
+      {importStatus && (
+        <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-sm border ${
+          importStatus.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' :
+          importStatus.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' :
+          'bg-blue-50 border-blue-200 text-blue-700'
+        }`}>
+          {importStatus.type === 'loading' ? <FiRefreshCw size={12} className="animate-spin" /> :
+           importStatus.type === 'success' ? <FiCheckCircle size={12} /> :
+           <FiAlertTriangle size={12} />}
+          {importStatus.message}
+        </div>
+      )}
+
+      {/* Excel Info Banner */}
+      {!useImported && (
+        <Card className="border-dashed border-primary/30 bg-primary/5">
+          <CardContent className="p-3">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-sm bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                <FiFile size={16} className="text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-foreground">Import Sales Data from Excel</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
+                  Download the template, fill in your sales data (daily sales, category distribution, product sales), then import the file to see analytics charts update with your data.
+                </p>
+                <div className="flex items-center gap-2 mt-2">
+                  <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1 px-2" onClick={handleDownloadTemplate}>
+                    <FiDownload size={10} /> Step 1: Download Template
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-7 text-[10px] gap-1 px-2" onClick={() => fileInputRef.current?.click()}>
+                    <FiUpload size={10} /> Step 2: Import Filled File
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1352,9 +1529,9 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
           <CardContent className="p-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Today Revenue</p>
-                <p className="text-xl font-bold text-foreground mt-0.5">{formatCurrency(todayRevenue)}</p>
-                <p className="text-[10px] text-green-600 font-medium mt-0.5 flex items-center gap-0.5"><FiTrendingUp size={10} /> +12.5% vs yesterday</p>
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">{useImported ? 'Total Revenue' : 'Today Revenue'}</p>
+                <p className="text-xl font-bold text-foreground mt-0.5">{formatCurrency(useImported ? importedTotalRevenue : todayRevenue)}</p>
+                <p className="text-[10px] text-green-600 font-medium mt-0.5 flex items-center gap-0.5"><FiTrendingUp size={10} /> {useImported ? 'From imported data' : '+12.5% vs yesterday'}</p>
               </div>
               <div className="w-9 h-9 rounded-sm bg-blue-100 flex items-center justify-center"><FiDollarSign size={16} className="text-blue-600" /></div>
             </div>
@@ -1364,9 +1541,9 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
           <CardContent className="p-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Transactions</p>
-                <p className="text-xl font-bold text-foreground mt-0.5">{totalTransactions}</p>
-                <p className="text-[10px] text-green-600 font-medium mt-0.5 flex items-center gap-0.5"><FiTrendingUp size={10} /> +8 today</p>
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">{useImported ? 'Data Points' : 'Transactions'}</p>
+                <p className="text-xl font-bold text-foreground mt-0.5">{useImported ? activeDailySales.length : totalTransactions}</p>
+                <p className="text-[10px] text-green-600 font-medium mt-0.5 flex items-center gap-0.5"><FiTrendingUp size={10} /> {useImported ? `${activeDailySales.length} days` : '+8 today'}</p>
               </div>
               <div className="w-9 h-9 rounded-sm bg-green-100 flex items-center justify-center"><FiActivity size={16} className="text-green-600" /></div>
             </div>
@@ -1376,9 +1553,9 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
           <CardContent className="p-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Avg Bill Value</p>
-                <p className="text-xl font-bold text-foreground mt-0.5">{formatCurrency(avgBillValue)}</p>
-                <p className="text-[10px] text-muted-foreground font-medium mt-0.5">per transaction</p>
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Avg {useImported ? 'Daily' : 'Bill'} Value</p>
+                <p className="text-xl font-bold text-foreground mt-0.5">{formatCurrency(useImported ? (activeDailySales.length > 0 ? importedTotalRevenue / activeDailySales.length : 0) : avgBillValue)}</p>
+                <p className="text-[10px] text-muted-foreground font-medium mt-0.5">{useImported ? 'per day' : 'per transaction'}</p>
               </div>
               <div className="w-9 h-9 rounded-sm bg-purple-100 flex items-center justify-center"><FiBarChart2 size={16} className="text-purple-600" /></div>
             </div>
@@ -1389,8 +1566,8 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Top Product</p>
-                <p className="text-sm font-bold text-foreground mt-0.5 truncate">{topProducts[0]?.name ?? 'N/A'}</p>
-                <p className="text-[10px] text-muted-foreground font-medium mt-0.5">{topProducts[0]?.qty ?? 0} units sold</p>
+                <p className="text-sm font-bold text-foreground mt-0.5 truncate">{useImported ? (importedTopProduct?.product ?? 'N/A') : (billTopProducts[0]?.name ?? 'N/A')}</p>
+                <p className="text-[10px] text-muted-foreground font-medium mt-0.5">{useImported ? `${importedTopProduct?.unitsSold ?? 0} units` : `${billTopProducts[0]?.qty ?? 0} units sold`}</p>
               </div>
               <div className="w-9 h-9 rounded-sm bg-orange-100 flex items-center justify-center"><FiPackage size={16} className="text-orange-600" /></div>
             </div>
@@ -1403,38 +1580,50 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
         {/* Daily Sales Bar Chart */}
         <Card>
           <CardHeader className="p-3 pb-1">
-            <CardTitle className="text-sm">Weekly Sales</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm">{useImported ? 'Sales by Period' : 'Weekly Sales'}</CardTitle>
+              {useImported && <Badge variant="outline" className="text-[9px]">Imported</Badge>}
+            </div>
           </CardHeader>
           <CardContent className="p-3 pt-2">
             <div className="flex items-end gap-2 h-40">
-              {DAILY_SALES.map((d, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                  <span className="text-[9px] text-muted-foreground font-medium">{String(d.revenue / 1000)}k</span>
-                  <div className="w-full rounded-sm transition-all duration-500" style={{ height: `${(d.revenue / maxDailySale) * 120}px`, backgroundColor: `hsl(220, 75%, ${50 + i * 3}%)` }} />
-                  <span className="text-[10px] text-muted-foreground">{d.day}</span>
+              {activeDailySales.map((d, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1" title={`${d.day}: ${formatCurrency(d.revenue)}`}>
+                  <span className="text-[9px] text-muted-foreground font-medium">{d.revenue >= 1000 ? `${(d.revenue / 1000).toFixed(1)}k` : String(d.revenue)}</span>
+                  <div className="w-full rounded-sm transition-all duration-500" style={{ height: `${(d.revenue / maxDailySale) * 120}px`, backgroundColor: `hsl(220, 75%, ${50 + (i % 7) * 3}%)` }} />
+                  <span className="text-[10px] text-muted-foreground truncate max-w-full">{d.day}</span>
                 </div>
               ))}
             </div>
+            {activeDailySales.length === 0 && (
+              <div className="h-40 flex items-center justify-center text-xs text-muted-foreground">No daily sales data</div>
+            )}
           </CardContent>
         </Card>
 
         {/* Category Distribution */}
         <Card>
           <CardHeader className="p-3 pb-1">
-            <CardTitle className="text-sm">Category Distribution</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm">Category Distribution</CardTitle>
+              {useImported && <Badge variant="outline" className="text-[9px]">Imported</Badge>}
+            </div>
           </CardHeader>
           <CardContent className="p-3 pt-2">
             <div className="space-y-2.5">
-              {CATEGORY_DIST.map((cat, i) => (
+              {activeCategoryDist.map((cat, i) => (
                 <div key={i} className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground w-16 text-right shrink-0">{cat.name}</span>
+                  <span className="text-xs text-muted-foreground w-20 text-right shrink-0 truncate" title={cat.name}>{cat.name}</span>
                   <div className="flex-1 h-5 bg-secondary rounded-sm overflow-hidden">
-                    <div className="h-full rounded-sm transition-all duration-500" style={{ width: `${cat.value}%`, backgroundColor: cat.color }} />
+                    <div className="h-full rounded-sm transition-all duration-500" style={{ width: `${Math.min(cat.value, 100)}%`, backgroundColor: cat.color }} />
                   </div>
-                  <span className="text-xs font-semibold w-8">{cat.value}%</span>
+                  <span className="text-xs font-semibold w-10 text-right">{cat.value}%</span>
                 </div>
               ))}
             </div>
+            {activeCategoryDist.length === 0 && (
+              <div className="h-32 flex items-center justify-center text-xs text-muted-foreground">No category data</div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -1442,7 +1631,10 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
       {/* Top Products Table */}
       <Card>
         <CardHeader className="p-3 pb-1">
-          <CardTitle className="text-sm">Top Selling Products</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm">Top Selling Products</CardTitle>
+            {useImported && <Badge variant="outline" className="text-[9px]">Imported - {activeTopProducts.length} products</Badge>}
+          </div>
         </CardHeader>
         <CardContent className="p-3 pt-2">
           <div className="overflow-x-auto">
@@ -1456,7 +1648,7 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
                 </tr>
               </thead>
               <tbody>
-                {topProducts.map((product, i) => (
+                {activeTopProducts.map((product, i) => (
                   <tr key={i} className="border-b border-border last:border-0">
                     <td className="p-2 text-xs text-muted-foreground">{i + 1}</td>
                     <td className="p-2 text-xs font-medium">{product.name}</td>
@@ -1464,7 +1656,7 @@ function AnalyticsDashboardScreen({ bills }: { bills: Bill[] }) {
                     <td className="p-2 text-xs text-right font-semibold">{formatCurrency(product.revenue)}</td>
                   </tr>
                 ))}
-                {topProducts.length === 0 && (
+                {activeTopProducts.length === 0 && (
                   <tr><td colSpan={4} className="p-4 text-center text-muted-foreground text-xs">No sales data yet</td></tr>
                 )}
               </tbody>
